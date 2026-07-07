@@ -297,7 +297,7 @@ window.lookupStudent = async function() {
 
     data.forEach(e => {
       html += `<div class="class-block">
-        <div class="class-header">📚 ${e.lop} · Nhóm ${e.nhom || '?'}</div>
+        <div class="class-header">📚 Nhóm ${e.nhom || '?'}</div>
         <div class="scores-grid">
           <div class="score-cell"><div class="score-label">Phát biểu (lần)</div>${fmtStr(e.phat_bieu)}</div>
           <div class="score-cell"><div class="score-label">Vắng không phép</div>${fmtStr(e.vang_khong_phep || '0')}</div>
@@ -437,7 +437,6 @@ window.lookupStudent = async function() {
   <div class="logo">📋</div>
   <div class="header-text">
     <h1>Hệ Thống Tra Cứu Điểm</h1>
-    <p>Học kỳ 2 · Năm học 2025–2026</p>
   </div>
 </header>
 
