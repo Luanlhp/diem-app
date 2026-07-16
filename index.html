@@ -255,11 +255,10 @@ window.lookupStudent = async function() {
 
     const allData = snap.docs.map(d => d.data());
 
-    // Lọc theo mã lớp học phần
+    // Lọc theo mã lớp học phần — khớp chính xác
     const data = allData.filter(e => {
       const a = (e.lop_hoc_phan || '').toUpperCase().replace(/\s/g, '');
-      const b = (e.lop || '').toUpperCase().replace(/\s/g, '');
-      return a.includes(lop) || lop.includes(a) || b.includes(lop) || lop.includes(b);
+      return a === lop;
     });
 
     if (!data.length) {
@@ -273,7 +272,7 @@ window.lookupStudent = async function() {
     const fmtScore = (v, hi = false) => {
       if (v === null || v === undefined) return `<span class="score-value na">—</span>`;
       const cls = hi ? (v >= 8 ? 'good' : v >= 5 ? 'highlight' : 'bad') : '';
-      return `<span class="score-value ${cls}">${v.toFixed(2)}</span>`;
+      return `<span class="score-value ${cls}">${v.toFixed(1)}</span>`;
     };
 
     let html = `<div class="result-area">
