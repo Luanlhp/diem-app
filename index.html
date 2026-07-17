@@ -8,7 +8,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, query, where, getDocs, writeBatch, doc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, collection, query, where, getDocs, writeBatch, doc, getDoc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey:            "AIzaSyChCPulbIDZzICRbJ69qKbcJZxncfuA5w0",
@@ -22,6 +22,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
 
+// ── PASSWORD ──
 const DEFAULT_PASSWORD = 'giaovien2025';
 function getSavedPassword() { return localStorage.getItem('gv_pw') || DEFAULT_PASSWORD; }
 
@@ -32,6 +33,7 @@ window.checkPassword = function() {
     document.getElementById('pw-gate').style.display = 'none';
     document.getElementById('upload-panel').style.display = '';
     errEl.classList.remove('show');
+    loadSheetList();
   } else {
     errEl.classList.add('show');
     document.getElementById('pw-input').value = '';
@@ -57,6 +59,7 @@ window.changePassword = function() {
   alert('✅ Đổi mật khẩu thành công!');
 };
 
+// ── NAVIGATION ──
 window.goTo = function(screen) {
   document.getElementById('screen-home').style.display = 'none';
   document.getElementById('screen-teacher').classList.remove('active');
@@ -144,6 +147,7 @@ function parseWorkbook(wb) {
       const holot = cols.holot >= 0 ? String(row[cols.holot] || '').trim() : '';
       const ten   = cols.ten   >= 0 ? String(row[cols.ten]   || '').trim() : '';
       const lhp   = cols.lhp   >= 0 ? String(row[cols.lhp]  || '').trim() : '';
+      const gc    = cols.ghichu >= 0 ? String(row[cols.ghichu] || '').trim() : '';
 
       records.push({
         mssv:           rawMssv.toUpperCase(),
@@ -151,10 +155,10 @@ function parseWorkbook(wb) {
         lop:            className || sheetName,
         lop_hoc_phan:   lhp,
         sheet:          sheetName,
-        nhom:           cols.nhom   >= 0 ? String(row[cols.nhom]   || '').trim() : '',
+        nhom:           cols.nhom   >= 0 ? String(row[cols.nhom] || '').trim() : '',
         diem_bai_tap:   fmt(cols.diembt >= 0 ? row[cols.diembt] : null),
         diem_qua_trinh: fmt(cols.diemqt >= 0 ? row[cols.diemqt] : null),
-        ghi_chu:        cols.ghichu >= 0 ? String(row[cols.ghichu] || '').trim() : '',
+        ghi_chu:        gc,
       });
       count++;
     }
@@ -164,6 +168,87 @@ function parseWorkbook(wb) {
 
   return { records, sheetsInfo };
 }
+
+// ── SHEET REGISTRY (lưu metadata các sheet đã upload) ──
+async function saveSheetMeta(sheetsInfo, fileName) {
+  const metaRef = doc(db, 'meta', 'sheets');
+  const snap = await getDoc(metaRef);
+  const existing = snap.exists() ? (snap.data().list || []) : [];
+
+  const now = new Date().toISOString();
+  const newSheets = sheetsInfo.filter(s => s.count > 0).map(s => ({
+    sheet: s.name,
+    className: s.className || s.name,
+    count: s.count,
+    fileName: fileName,
+    uploadedAt: now,
+  }));
+
+  // Thay thế sheet cùng tên, giữ các sheet khác
+  const newNames = new Set(newSheets.map(s => s.sheet));
+  const merged = [...existing.filter(s => !newNames.has(s.sheet)), ...newSheets];
+  await setDoc(metaRef, { list: merged });
+}
+
+async function removeSheetMeta(sheetName) {
+  const metaRef = doc(db, 'meta', 'sheets');
+  const snap = await getDoc(metaRef);
+  if (!snap.exists()) return;
+  const list = (snap.data().list || []).filter(s => s.sheet !== sheetName);
+  await setDoc(metaRef, { list });
+}
+
+async function loadSheetList() {
+  const listEl = document.getElementById('sheet-list-area');
+  listEl.innerHTML = `<div class="loading-banner" style="margin-top:0"><span class="spinner"></span> Đang tải...</div>`;
+
+  try {
+    const snap = await getDoc(doc(db, 'meta', 'sheets'));
+    const list = snap.exists() ? (snap.data().list || []) : [];
+
+    if (list.length === 0) {
+      listEl.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px;padding:16px 0">Chưa có lớp nào được upload</div>`;
+      return;
+    }
+
+    list.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+
+    let html = '';
+    list.forEach(s => {
+      const date = new Date(s.uploadedAt).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+      html += `<div class="sheet-manage-item" id="smi-${CSS.escape(s.sheet)}">
+        <div class="smi-info">
+          <div class="smi-name">${s.className}</div>
+          <div class="smi-meta">${s.count} SV · ${date} · <span style="color:var(--muted)">${s.fileName || ''}</span></div>
+        </div>
+        <button class="smi-del-btn" onclick="deleteSheet('${s.sheet.replace(/'/g,"\\'")}', '${s.className.replace(/'/g,"\\'")}')">🗑️ Xóa</button>
+      </div>`;
+    });
+    listEl.innerHTML = html;
+  } catch(err) {
+    listEl.innerHTML = `<div style="color:var(--error);font-size:13px">Lỗi tải danh sách: ${err.message}</div>`;
+  }
+}
+
+window.deleteSheet = async function(sheetName, className) {
+  if (!confirm(`Xóa toàn bộ điểm của lớp "${className}"?\nThao tác này không thể hoàn tác.`)) return;
+
+  const itemEl = document.getElementById(`smi-${CSS.escape(sheetName)}`);
+  if (itemEl) itemEl.style.opacity = '0.4';
+
+  try {
+    const q    = query(collection(db, 'diem'), where('sheet', '==', sheetName));
+    const snap = await getDocs(q);
+    const batch = writeBatch(db);
+    snap.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    await removeSheetMeta(sheetName);
+    await loadSheetList();
+  } catch(err) {
+    alert('Lỗi khi xóa: ' + err.message);
+    if (itemEl) itemEl.style.opacity = '1';
+  }
+};
 
 // ── UPLOAD ──
 window.handleFile = async function(file) {
@@ -184,6 +269,7 @@ window.handleFile = async function(file) {
 
       resultEl.innerHTML = `<div class="loading-banner"><span class="spinner"></span> Đang lưu ${records.length} sinh viên...</div>`;
 
+      // Xoá data cũ của các sheet trong file
       const sheetNames = [...new Set(records.map(r => r.sheet))];
       for (const sn of sheetNames) {
         const q    = query(collection(db, 'diem'), where('sheet', '==', sn));
@@ -193,29 +279,23 @@ window.handleFile = async function(file) {
         await delBatch.commit();
       }
 
+      // Insert mới
       for (let i = 0; i < records.length; i += 500) {
         const batch = writeBatch(db);
         records.slice(i, i + 500).forEach(r => batch.set(doc(collection(db, 'diem')), r));
         await batch.commit();
       }
 
-      let html = `<div class="success-banner">✅ Đã lưu thành công · ${records.length} sinh viên từ ${sheetsInfo.filter(s=>s.count>0).length} lớp</div>`;
-      html += `<div class="sheets-section"><div class="section-label">Danh sách lớp</div><div class="sheet-list">`;
-      sheetsInfo.forEach(s => {
-        if (s.count === 0) return;
-        html += `<div class="sheet-item">
-          <div>
-            <div class="sheet-name">${s.name}</div>
-            ${s.className && s.className !== s.name ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${s.className.substring(0,70)}</div>` : ''}
-          </div>
-          <span class="sheet-badge ok">${s.count} SV</span>
-        </div>`;
-      });
-      html += `</div></div>`;
+      // Lưu metadata
+      await saveSheetMeta(sheetsInfo, file.name);
+      await loadSheetList();
+
+      const validSheets = sheetsInfo.filter(s => s.count > 0);
+      let html = `<div class="success-banner">✅ Đã lưu thành công · ${records.length} sinh viên từ ${validSheets.length} lớp</div>`;
       resultEl.innerHTML = html;
 
     } catch(err) {
-      resultEl.innerHTML = `<div class="error-box"><div class="icon">❌</div><p>Lỗi khi lưu dữ liệu</p><small>${err.message}</small></div>`;
+      resultEl.innerHTML = `<div class="error-box"><div class="icon">❌</div><p>Lỗi khi lưu</p><small>${err.message}</small></div>`;
     }
   };
   reader.readAsBinaryString(file);
@@ -254,8 +334,6 @@ window.lookupStudent = async function() {
     }
 
     const allData = snap.docs.map(d => d.data());
-
-    // Lọc theo mã lớp học phần — khớp chính xác
     const data = allData.filter(e => {
       const a = (e.lop_hoc_phan || '').toUpperCase().replace(/\s/g, '');
       return a === lop;
@@ -341,28 +419,29 @@ function flashError(id) {
   .role-label { font-size: 16px; font-weight: 600; color: var(--navy); }
   .role-desc  { font-size: 12px; color: var(--muted); text-align: center; line-height: 1.5; }
 
-  .screen { display: none; width: 100%; max-width: 640px; }
+  .screen { display: none; width: 100%; max-width: 680px; }
   .screen.active { display: block; }
-  .card { background: var(--card); border-radius: var(--radius); padding: 32px; box-shadow: 0 2px 20px rgba(15,32,68,0.08); border: 1px solid var(--border); }
+  .card { background: var(--card); border-radius: var(--radius); padding: 32px; box-shadow: 0 2px 20px rgba(15,32,68,0.08); border: 1px solid var(--border); margin-bottom: 16px; }
   .back-btn { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; margin-bottom: 24px; border: none; background: none; padding: 0; font-family: inherit; }
   .back-btn:hover { color: var(--blue); }
   .screen-title { font-size: 22px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
   .screen-sub   { color: var(--muted); font-size: 14px; margin-bottom: 28px; }
+  .section-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px; }
 
-  .upload-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 48px 24px; text-align: center; cursor: pointer; transition: all 0.18s; position: relative; }
+  .upload-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 40px 24px; text-align: center; cursor: pointer; transition: all 0.18s; position: relative; }
   .upload-zone:hover, .upload-zone.drag { border-color: var(--blue); background: rgba(37,99,235,0.03); }
   .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-  .upload-icon { font-size: 40px; margin-bottom: 12px; }
+  .upload-icon { font-size: 36px; margin-bottom: 10px; }
   .upload-text { font-size: 15px; font-weight: 600; color: var(--navy); margin-bottom: 4px; }
   .upload-hint { font-size: 12px; color: var(--muted); }
 
-  .sheets-section { margin-top: 24px; }
-  .section-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
-  .sheet-list { display: flex; flex-direction: column; gap: 8px; }
-  .sheet-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--bg); border-radius: 10px; border: 1px solid var(--border); font-size: 14px; }
-  .sheet-name { font-weight: 500; color: var(--navy); }
-  .sheet-badge { font-size: 11px; padding: 3px 10px; border-radius: 20px; background: rgba(37,99,235,0.1); color: var(--blue); font-weight: 600; }
-  .sheet-badge.ok { background: rgba(16,185,129,0.1); color: var(--success); }
+  /* Sheet manager */
+  .sheet-manage-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: var(--bg); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 8px; gap: 12px; transition: opacity 0.2s; }
+  .smi-info { flex: 1; min-width: 0; }
+  .smi-name { font-size: 13px; font-weight: 600; color: var(--navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .smi-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .smi-del-btn { flex-shrink: 0; background: none; border: 1px solid #fca5a5; border-radius: 8px; color: var(--error); font-size: 12px; padding: 6px 10px; cursor: pointer; font-family: inherit; transition: all 0.15s; white-space: nowrap; }
+  .smi-del-btn:hover { background: #fef2f2; }
 
   .lock-icon { font-size: 48px; text-align: center; margin-bottom: 16px; }
   .pw-error { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #7f1d1d; margin-top: 12px; text-align: center; display: none; }
@@ -385,8 +464,8 @@ function flashError(id) {
   .search-btn:hover { opacity: 0.9; }
   .search-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-  .success-banner { display: flex; align-items: center; gap: 10px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.25); border-radius: 10px; padding: 12px 16px; margin-top: 20px; color: #065f46; font-size: 14px; font-weight: 500; }
-  .loading-banner { display: flex; align-items: center; gap: 10px; background: rgba(37,99,235,0.07); border: 1px solid rgba(37,99,235,0.2); border-radius: 10px; padding: 12px 16px; margin-top: 20px; color: var(--blue); font-size: 14px; font-weight: 500; }
+  .success-banner { display: flex; align-items: center; gap: 10px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.25); border-radius: 10px; padding: 12px 16px; margin-top: 16px; color: #065f46; font-size: 14px; font-weight: 500; }
+  .loading-banner { display: flex; align-items: center; gap: 10px; background: rgba(37,99,235,0.07); border: 1px solid rgba(37,99,235,0.2); border-radius: 10px; padding: 12px 16px; margin-top: 16px; color: var(--blue); font-size: 14px; font-weight: 500; }
   .error-box { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); border-radius: 10px; padding: 20px; text-align: center; margin-top: 20px; }
   .error-box .icon { font-size: 32px; margin-bottom: 8px; }
   .error-box p { color: #7f1d1d; font-size: 14px; font-weight: 500; }
@@ -408,7 +487,9 @@ function flashError(id) {
   .score-value.good { color: var(--success); }
   .score-value.bad  { color: var(--error); }
   .score-value.na   { color: var(--border); font-size: 16px; font-weight: 400; }
-  .note-box { margin-top: 8px; padding: 10px 14px; background: rgba(245,166,35,0.1); border: 1px solid rgba(245,166,35,0.3); border-radius: 8px; font-size: 12px; color: #92400e; display: flex; gap: 8px; }
+  .note-box { margin-top: 8px; padding: 12px 14px; background: rgba(245,166,35,0.08); border: 1px solid rgba(245,166,35,0.3); border-radius: 8px; font-size: 13px; color: #92400e; display: flex; gap: 8px; align-items: flex-start; line-height: 1.5; }
+
+  .divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
 
   .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -443,7 +524,7 @@ function flashError(id) {
       <div class="role-card" onclick="goTo('teacher')">
         <div class="role-icon">👩‍🏫</div>
         <div class="role-label">Giảng Viên</div>
-        <div class="role-desc">Upload file điểm Excel để công bố kết quả</div>
+        <div class="role-desc">Upload file điểm và quản lý danh sách lớp</div>
       </div>
       <div class="role-card" onclick="goTo('student')">
         <div class="role-icon">🎓</div>
@@ -457,10 +538,11 @@ function flashError(id) {
   <div id="screen-teacher" class="screen">
     <button class="back-btn" onclick="goTo('home')">← Quay lại</button>
 
+    <!-- Password gate -->
     <div class="card" id="pw-gate">
       <div class="lock-icon">🔐</div>
       <h2 class="screen-title" style="text-align:center">Xác thực Giảng Viên</h2>
-      <p class="screen-sub" style="text-align:center;margin-bottom:24px">Nhập mật khẩu để truy cập trang upload điểm</p>
+      <p class="screen-sub" style="text-align:center;margin-bottom:24px">Nhập mật khẩu để tiếp tục</p>
       <div class="input-group">
         <label>Mật khẩu</label>
         <div class="pw-input-wrap">
@@ -473,18 +555,29 @@ function flashError(id) {
       <div class="pw-error" id="pw-error">Mật khẩu không đúng. Vui lòng thử lại.</div>
     </div>
 
-    <div class="card" id="upload-panel" style="display:none">
-      <div class="logged-badge">✅ Đã xác thực · Giảng viên</div>
-      <h2 class="screen-title">Upload File Điểm</h2>
-      <p class="screen-sub">Tải lên file Excel — dữ liệu sẽ được lưu vào Firebase</p>
-      <div class="upload-zone" id="drop-zone">
-        <input type="file" accept=".xlsx,.xls" onchange="handleFile(this.files[0])">
-        <div class="upload-icon">📂</div>
-        <div class="upload-text">Kéo thả file vào đây hoặc nhấn để chọn</div>
-        <div class="upload-hint">Hỗ trợ định dạng .xlsx, .xls</div>
+    <!-- Upload panel -->
+    <div id="upload-panel" style="display:none">
+      <div class="card">
+        <div class="logged-badge">✅ Đã xác thực · Giảng viên</div>
+        <h2 class="screen-title">Upload File Điểm</h2>
+        <p class="screen-sub">Tải lên file Excel — dữ liệu sẽ được lưu vào Firebase</p>
+        <div class="upload-zone" id="drop-zone">
+          <input type="file" accept=".xlsx,.xls" onchange="handleFile(this.files[0])">
+          <div class="upload-icon">📂</div>
+          <div class="upload-text">Kéo thả file vào đây hoặc nhấn để chọn</div>
+          <div class="upload-hint">Hỗ trợ .xlsx, .xls</div>
+        </div>
+        <div id="upload-result"></div>
+        <button class="change-pw-btn" onclick="changePassword()">🔑 Đổi mật khẩu</button>
       </div>
-      <div id="upload-result"></div>
-      <button class="change-pw-btn" onclick="changePassword()">🔑 Đổi mật khẩu</button>
+
+      <!-- Sheet manager -->
+      <div class="card">
+        <div class="section-label">📂 Quản lý lớp đã upload</div>
+        <div id="sheet-list-area">
+          <div style="text-align:center;color:var(--muted);font-size:13px;padding:8px 0">Đang tải...</div>
+        </div>
+      </div>
     </div>
   </div>
 
