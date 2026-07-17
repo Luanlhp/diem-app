@@ -48,16 +48,6 @@ window.togglePwVisibility = function() {
   eye.textContent = inp.type === 'password' ? '👁️' : '🙈';
 };
 
-window.changePassword = function() {
-  const current = prompt('Nhập mật khẩu hiện tại:');
-  if (current !== getSavedPassword()) { alert('Mật khẩu hiện tại không đúng.'); return; }
-  const newPw = prompt('Nhập mật khẩu mới (ít nhất 6 ký tự):');
-  if (!newPw || newPw.length < 6) { alert('Mật khẩu phải có ít nhất 6 ký tự.'); return; }
-  const conf = prompt('Nhập lại mật khẩu mới:');
-  if (newPw !== conf) { alert('Mật khẩu xác nhận không khớp.'); return; }
-  localStorage.setItem('gv_pw', newPw);
-  alert('✅ Đổi mật khẩu thành công!');
-};
 
 // ── NAVIGATION ──
 window.goTo = function(screen) {
@@ -567,7 +557,6 @@ function flashError(id) {
           <div class="upload-hint">Hỗ trợ .xlsx, .xls</div>
         </div>
         <div id="upload-result"></div>
-        <button class="change-pw-btn" onclick="changePassword()">🔑 Đổi mật khẩu</button>
       </div>
 
       <!-- Sheet manager -->
