@@ -367,7 +367,7 @@ window.lookupStudent = async function() {
       html += `<div class="class-block">
         <div class="class-header">📚 ${lopLabel} · Nhóm ${e.nhom || '?'}</div>
         <div class="scores-grid">
-          <div class="score-cell"><div class="score-label">Điểm bài tập (20%)</div>${fmtScore(e.diem_bai_tap)}</div>
+          <div class="score-cell"><div class="score-label">Điểm bài tập làm tại lớp</div>${fmtScore(e.diem_bai_tap)}</div>
           <div class="score-cell"><div class="score-label">Tổng điểm quá trình</div>${fmtScore(e.diem_qua_trinh, true)}</div>
         </div>
         ${e.ghi_chu ? `<div class="note-box">📌 <span>${e.ghi_chu}</span></div>` : ''}
